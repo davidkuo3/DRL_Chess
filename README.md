@@ -3,6 +3,11 @@
 ## Project Introduction
 This project implements a simplified Deep Reinforcement Learning (DRL) architecture to analyze the evolution of self-play strategies in Chess. It focuses on the impact of different exploration strategies (MCTS vs. epsilon-greedy) on behavioral evolution.
 
+### Project Introduction Video
+[![Project Introduction Video](https://img.shields.io/badge/YouTube-Video-red?style=for-the-badge&logo=youtube)](https://drive.google.com/file/d/1f7QIAEVo8A0je_4eNeBWz-3MLVjKUkW7/view?usp=sharing)
+[Watch the introduction video on Google Drive](https://drive.google.com/file/d/1f7QIAEVo8A0je_4eNeBWz-3MLVjKUkW7/view?usp=sharing)
+
+
 ## Project Structure
 - `openspec/`: Contains the project specifications and change management.
     - `specs/drl_chess.md`: The core system specification.
