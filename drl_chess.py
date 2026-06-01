@@ -128,7 +128,9 @@ class ActionSelector:
     def select_action(self, env, network, device):
         legal_moves = env.get_legal_moves()
         if not legal_moves:
-            return None
+            return None, None
+            
+        pi = np.zeros(4096)
 
         if self.method == "epsilon-greedy":
             if random.random() < self.epsilon:
@@ -150,7 +152,9 @@ class ActionSelector:
                         best_prob = prob
                         best_move = move
                         
-                return best_move if best_move else random.choice(legal_moves)
+                action = best_move if best_move else random.choice(legal_moves)
+                pi[move_to_index(action)] = 1.0
+                return action, pi
                 
         elif self.method == "mcts":
             import math
@@ -169,8 +173,11 @@ class ActionSelector:
                 policy, _ = network(state_tensor)
             policy = policy.squeeze(0)
             
-            for move in legal_moves:
+            # 加入 Dirichlet Noise 增加探索性，避免模型早期卡在單一走法
+            noise = np.random.dirichlet([0.3] * len(legal_moves))
+            for i, move in enumerate(legal_moves):
                 prob = torch.exp(policy[move_to_index(move)]).item()
+                prob = 0.75 * prob + 0.25 * noise[i]
                 root.children[move] = MCTSNode(prior=prob)
                 
             num_simulations = 40 # MCTS推演次數 (AlphaZero用800，但CPU太慢所以用40)
@@ -219,8 +226,13 @@ class ActionSelector:
                     n.visit_count += 1
                     n.value_sum += value
                     
+            # 將 MCTS 的拜訪次數轉為機率分佈 (pi)
+            total_visits = sum(c.visit_count for c in root.children.values())
+            for act, child in root.children.items():
+                pi[move_to_index(act)] = child.visit_count / max(total_visits, 1)
+                
             best_move = max(root.children.items(), key=lambda item: item[1].visit_count)[0]
-            return best_move
+            return best_move, pi
 
 # ==========================================
 # 5. Self-Play Loop
@@ -239,14 +251,12 @@ def self_play(network, episodes=10, selector_method="epsilon-greedy", device='cp
         print(f"Starting Episode {episode+1}")
         while not done:
             state_copy = env.get_state()
-            action = selector.select_action(env, network, device)
+            action, pi = selector.select_action(env, network, device)
             
             if action is None:
                 break
                 
-            # Set the chosen action to 1 in pi for training
-            pi = np.zeros(4096) 
-            pi[move_to_index(action)] = 1.0
+            # MCTS 現在會直接回傳有豐富分佈資訊的 pi
             trajectory.append((state_copy, pi))
             
             _, reward, done = env.step(action)
@@ -293,10 +303,11 @@ def train(network, memory, epochs=1, batch_size=32, device='cpu'):
         # Value loss (MSE)
         value_loss = F.mse_loss(v, z_tensor)
         
-        # Policy loss (Policy Gradient / REINFORCE)
-        # 這裡非常重要！我們必須乘上勝負回饋 (z_tensor)
-        # 這樣網路才會知道：「贏了」要強化這個走法，「輸了」要避免這個走法
-        policy_loss = -torch.sum(pi_tensor * p * z_tensor) / batch_size
+        # Policy loss (Cross Entropy between MCTS pi and network p)
+        # 既然我們已經有了強大的 MCTS 幫我們計算出高品質的 pi 分佈，
+        # 網路只需要「單純模仿 MCTS 的機率分佈」即可，不需要再乘上勝負 z (這是 AlphaZero 的標準作法)。
+        # 加上 z 反而會因為當 z=-1 時要最小化一個沒有下限的負數，導致 Loss 爆炸。
+        policy_loss = -torch.sum(pi_tensor * p) / batch_size
         
         loss = value_loss + policy_loss
         loss.backward()
@@ -310,11 +321,17 @@ if __name__ == "__main__":
     
     # Initialize network
     net = DRLChessNet().to(device)
+    import os
+    if os.path.exists("model.pth"):
+        net.load_state_dict(torch.load("model.pth", map_location=device, weights_only=True))
+        print("已偵測到舊的 model.pth，成功載入！將在此基礎上繼續訓練...")
+    else:
+        print("未偵測到舊模型，將從零開始訓練。")
     
     # --- 階段三：迭代進化 (Iteration) ---
     iterations = 5  # 總共進行 5 大輪的進化
     episodes_per_iter = 5  # MCTS 運算量非常龐大，為了能在 CPU 上跑完，先調低至 5 局
-    epochs_per_iter = 5    # 每輪收集完經驗後，讓大腦訓練 5 次
+    epochs_per_iter = 500    # 每輪收集完經驗後，讓大腦訓練 5 次
     
     for iteration in range(iterations):
         print(f"\n===========================================")

@@ -132,7 +132,7 @@ class ChessGUI:
         self.draw_board()
 
     def ai_turn(self):
-        ai_move = self.selector.select_action(self.env, self.net, self.device)
+        ai_move, _ = self.selector.select_action(self.env, self.net, self.device)
         if ai_move:
             self.env.step(ai_move)
         

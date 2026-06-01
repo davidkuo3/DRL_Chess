@@ -10,14 +10,16 @@ def play_game():
     env = ChessEnv()
     device = torch.device("cpu")
     
-    # Initialize the neural network (currently untrained)
+    # Initialize the neural network
     net = DRLChessNet().to(device)
+    import os
+    if os.path.exists("model.pth"):
+        net.load_state_dict(torch.load("model.pth", map_location=device, weights_only=True))
+        print("Loaded trained model from model.pth")
     net.eval()
     
-    # Action selector for the AI (using epsilon-greedy for now)
-    # We set epsilon to 0.1 so it mostly uses the network (even if untrained), but sometimes explores.
-    # If you want it to be completely random, set epsilon=1.0.
-    selector = ActionSelector(method="epsilon-greedy", epsilon=0.1)
+    # Action selector for the AI (use MCTS for strongest play)
+    selector = ActionSelector(method="mcts")
 
     while not env.board.is_game_over():
         print("\n" + "="*30)
@@ -45,7 +47,7 @@ def play_game():
         else:
             # AI's turn
             print("AI is thinking...")
-            ai_move = selector.select_action(env, net, device)
+            ai_move, _ = selector.select_action(env, net, device)
             print(f"AI played: {ai_move}")
             env.step(ai_move)
 
